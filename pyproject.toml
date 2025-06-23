@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name            = "fastlog-io"
+version         = "0.1.0"
+description     = "Thin wrapper around loguru with Prometheus metrics"
+readme          = "README.md"
+license         = { text = "MIT License" }
+requires-python = ">=3.10"
+
+authors = [
+  { name = "owq" }
+]
+
+dependencies = [
+  "loguru>=0.7.3",
+  "nanoid>=2.0.0",
+]
+
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Operating System :: OS Independent",
+  "Topic :: System :: Logging"
+]
+
+[project.optional-dependencies]
+metrics = ["prometheus-client>=0.22.1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fastlog"]
