@@ -6,6 +6,7 @@ Public API:
     log                  – the global loguru log
     start_metrics_server – start a Prometheus /metrics endpoint
 """
+
 from .core import configure, get_log
 from .metrics import start_metrics_server
 

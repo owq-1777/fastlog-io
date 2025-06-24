@@ -2,6 +2,7 @@
 
 Expose counters to let Grafana/Prometheus track log volume by level and logger name.
 """
+
 try:
     from prometheus_client import Counter, start_http_server
 

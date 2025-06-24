@@ -18,8 +18,8 @@ def test_name_binding_and_trace_id():
     * extra["name"] == "worker"
     * extra["trace_id"] field exists (auto-generated or inherited)
     """
-    from fastlog import configure, get_log
     import fastlog.core as _core
+    from fastlog import configure, get_log
 
     records: list[dict] = []
 
@@ -50,9 +50,7 @@ def test_start_metrics_server(monkeypatch):
     def fake_start_http_server(port):
         called["port"] = port
 
-    monkeypatch.setattr(
-        "fastlog.metrics.start_http_server", fake_start_http_server, raising=True
-    )
+    monkeypatch.setattr("fastlog.metrics.start_http_server", fake_start_http_server, raising=True)
 
     start_metrics_server(9100)
     assert called.get("port") == 9100

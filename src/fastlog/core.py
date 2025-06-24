@@ -1,8 +1,8 @@
-from pprint import pformat
 import sys
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
+from pprint import pformat
 from types import MethodType
 from typing import ContextManager, Iterator, cast
 
@@ -90,7 +90,6 @@ def configure(
 
     cfg = Config(**cfg_kwargs)
 
-
     def format_record(record: dict) -> str:
         """
         Custom format for loguru loggers.
@@ -139,6 +138,7 @@ def configure(
 
     global _configure
     _configure = True
+
 
 @lru_cache
 def get_log(name: str | None = None):

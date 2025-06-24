@@ -3,8 +3,10 @@ import logging
 from loguru import logger
 
 from .helpers import generate_id
+
+
 class InterceptHandler(logging.Handler):
-    """ A handler that forwards standard logging records to Loguru. """
+    """A handler that forwards standard logging records to Loguru."""
 
     _cache: dict[str, str] = {}
 
@@ -32,7 +34,7 @@ class InterceptHandler(logging.Handler):
 
 
 def reset_std_logging() -> None:
-    """ Replace the root logger's handlers with a single `InterceptHandler`. """
+    """Replace the root logger's handlers with a single `InterceptHandler`."""
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(InterceptHandler())
