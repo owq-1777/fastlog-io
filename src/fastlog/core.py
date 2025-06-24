@@ -12,7 +12,7 @@ from loguru._logger import context as _context
 
 from .config import Config
 from .helpers import generate_id
-from .intercept import reset_std_logging
+from .intercept import reset_std_logging, reset_uvicorn_logging
 from .metrics import metrics_patch
 
 __all__ = ['configure', 'get_log', 'trace_ctx']
@@ -135,6 +135,7 @@ def configure(
         )
 
     reset_std_logging()
+    reset_uvicorn_logging()
 
     global _configure
     _configure = True
