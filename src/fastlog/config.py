@@ -24,3 +24,5 @@ class Config:
         '<cyan>{module}.{function}:{line}</cyan> | '
         '<level>{message}</level>{exception}'
     )
+
+    action_format: str = '{module}.{function}:{line}'

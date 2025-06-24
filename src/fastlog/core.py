@@ -1,3 +1,4 @@
+from pprint import pformat
 import sys
 from contextlib import contextmanager
 from functools import lru_cache
@@ -70,6 +71,7 @@ logger = cast(Logger, logger)
 
 _configure: bool = False
 
+
 def configure(
     log_dir: str | Path | None = None,
     level: str | None = None,
@@ -88,6 +90,25 @@ def configure(
 
     cfg = Config(**cfg_kwargs)
 
+
+    def format_record(record: dict) -> str:
+        """
+        Custom format for loguru loggers.
+        Uses pformat for log any data like request/response body during debug.
+        Works with logging if loguru handler it.
+        """
+
+        loguru_format = cfg.format
+        if action := record['extra'].get('action'):
+            loguru_format = loguru_format.replace(cfg.action_format, f'{action: <12}')
+
+        if payload := record['extra'].get('payload'):
+            record['extra']['payload'] = pformat(payload, indent=4, compact=True, width=88)
+            loguru_format += '\n<level>{extra[payload]}</level>'
+
+        loguru_format += '{exception}\n'
+        return loguru_format
+
     global logger
 
     logger.remove()
@@ -96,7 +117,7 @@ def configure(
 
     logger.add(
         sys.stderr,
-        format=cfg.format,
+        format=format_record,
         level=cfg.level,
         colorize=True,
         enqueue=False,
@@ -106,7 +127,7 @@ def configure(
         enqueue = sys.platform.startswith('linux')
         logger.add(
             cfg.log_dir / 'app.log',
-            format=cfg.format,
+            format=format_record,
             level=cfg.level,
             rotation=cfg.rotation,
             retention=cfg.retention,

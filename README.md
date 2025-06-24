@@ -1,25 +1,22 @@
 <p align="center">
-  <a href="https://pypi.org/project/fastlog-io" target="_blank">
-  <img src="https://img.owq.world/2025/fastlog-logo-857f7d.png" alt="FastLOG">
+  <a href="https://github.com/owq-1777/fastlog-io" target="_blank" style="text-decoration:none">
+  	<img src="https://img.owq.world/2025/fastlog-logo-857f7d.png" alt="FastLOG">
   </a>
 </p>
 <p align="center">
     <em>FastLOG is a lightweight wrapper around <a href="https://github.com/Delgan/loguru" target="_blank">Loguru</a> that offers Prometheus metrics, automatic `trace_id`, colourful output, and a dead‑simple configuration API.</em>
 </p>
 <p align="center">
-  <a href="https://pypi.org/project/fastlog-io" target="_blank">
+  <a href="https://pypi.org/project/fastlog-io" target="_blank" style="text-decoration:none">
       <img src="https://img.shields.io/pypi/v/fastlog-io" alt="Package version">
   </a>
-  <span> | <span>
-  <a href="https://pypi.org/project/fastlog-io" target="_blank">
+  <a href="https://pypi.org/project/fastlog-io" target="_blank" style="text-decoration:none">
       <img src="https://img.shields.io/pypi/status/fastlog-io" alt="Development Status">
   </a>
-  <span> | <span>
-  <a href="https://pypi.org/project/fastlog-io" target="_blank">
+  <a href="https://pypi.org/project/fastlog-io" target="_blank" style="text-decoration:none">
       <img src="https://img.shields.io/pypi/pyversions/fastlog-io" alt="Supported Python versions">
   </a>
 </p>
-
 
 ---
 

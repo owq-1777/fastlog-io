@@ -9,3 +9,5 @@ ts.*
 
 # Virtual environments
 .venv
+
+logs/
