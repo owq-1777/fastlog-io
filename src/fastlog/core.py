@@ -15,7 +15,7 @@ from .helpers import generate_id
 from .intercept import reset_std_logging, reset_uvicorn_logging
 from .metrics import metrics_patch
 
-__all__ = ['configure', 'get_log', 'trace_ctx']
+__all__ = ['configure', 'get_log']
 
 logger = _logger
 
