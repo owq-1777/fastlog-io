@@ -17,19 +17,12 @@ __all__ = ['configure']
 
 
 class Logger(_Logger):
-    def __init__(self):
-        super().__init__(
-            _Core(),
-            exception=None,
-            depth=0,
-            record=False,
-            lazy=False,
-            colors=False,
-            raw=False,
-            capture=True,
-            patchers=[],
-            extra={},
-        )
+    def __init__(self, core, exception, depth, record, lazy, colors, raw, capture, patchers, extra):
+        super().__init__(core, exception, depth, record, lazy, colors, raw, capture, patchers, extra)
+
+    def bind(__self, **kwargs):  # noqa: N805
+        *options, extra = __self._options
+        return Logger(__self._core, *options, extra={**extra, **kwargs})
 
     @contextmanager
     def trace_ctx(self, trace_id: str | None = None, **keyword):
@@ -121,8 +114,18 @@ def patch_trace(record: Mapping[str, Any]) -> None:
 # --------------------------------------------------------------------------- #
 
 
-logger = Logger()
-logger = logger.patch(patch_trace)
+logger = Logger(
+    core=_Core(),
+    exception=None,
+    depth=0,
+    record=False,
+    lazy=False,
+    colors=False,
+    raw=False,
+    capture=True,
+    patchers=[patch_trace],
+    extra={},
+)
 
 
 def configure(
