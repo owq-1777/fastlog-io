@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name            = "fastlog-io"
-version         = "0.1.4"
-description     = "Thin wrapper around loguru with Prometheus metrics"
+version         = "0.1.6"
+description     = "loguru fast wrapping supports fastapi"
 readme          = "README.md"
 license         = { text = "MIT License" }
 requires-python = ">=3.10"
@@ -30,8 +30,6 @@ classifiers = [
   "Topic :: System :: Logging"
 ]
 
-[project.optional-dependencies]
-metrics = ["prometheus-client>=0.22.1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/fastlog"]
@@ -45,3 +43,8 @@ quote-style = "single"
 indent-style = "space"
 docstring-code-format = true
 line-ending = "auto"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.2.0",
+]

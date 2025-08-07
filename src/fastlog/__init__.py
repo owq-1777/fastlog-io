@@ -1,15 +1,10 @@
-"""logs package – import‑time ready logger with Prometheus metrics helper.
+import atexit as _atexit
+from .core import configure, logger
 
-Public API:
-    configure            – reconfigure sinks, level, etc.
-    get_log(name=None)   – get bound logger
-    log                  – the global loguru log
-    start_metrics_server – start a Prometheus /metrics endpoint
-"""
+__all__ = ['configure', 'log']
 
-from .core import configure, get_log
-from .metrics import start_metrics_server
+log = logger
 
-__all__ = ['configure', 'get_log', 'log', 'start_metrics_server']
+configure()
 
-log = get_log('app')
+_atexit.register(log.remove)

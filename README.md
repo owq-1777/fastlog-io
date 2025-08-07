@@ -25,7 +25,6 @@
 * **Zero‑config out of the box** – `from fastlog-io import log; log.info("hello")` works instantly.
 * **Unified interface** – `configure()` + `get_log(name)` keep formatting consistent across modules.
 * **Automatic `trace_id`** – generates a 7‑char NanoID when none is bound, perfect for request tracing.
-* **Prometheus ready** – one call to `start_metrics_server()` exposes `/metrics` with log counters.
 * **File rotation & retention** – default `rotation="100 MB"`; tune it via `configure()`.
 * **Stdlib compatibility** – built‑in `reset_std_logging()` redirects the `logging` module to fastlog-io.
 
@@ -35,26 +34,22 @@
 
 ```bash
 pip install fastlog-io
-# Use the prometheus dependency version
-pip install fastlog-io[metrics]
 ```
 
 **Requirements**
 
 * Python ≥ 3.12
 * [loguru](https://pypi.org/project/loguru/)
-* Optional: [prometheus‑client](https://pypi.org/project/prometheus-client/) for metric export
 
 ---
 
 ## ⚡ Quickstart
 
 ```python
-from fastlog import log, configure, start_metrics_server
+from fastlog import log, configure
 
 # override defaults if needed
 configure(level="DEBUG", log_dir="./logs")
-start_metrics_server(port=9100)
 
 log.info("service started")
 
@@ -81,21 +76,6 @@ Console output (colours stripped):
 | `LOG_ROTATION` | `100 MB`  | File rotation policy (Loguru syntax)                  |
 
 > These can also be passed directly to `configure()` and override environment values.
-
----
-
-## 📊 Metrics
-
-* **`log_messages_total{level, name}`** – total log messages, labelled by level and logger name.
-
-Prometheus scrape example:
-
-```yaml
-targets:
-  - job_name: fastlog-io
-    static_configs:
-      - targets: ["127.0.0.1:9100"]
-```
 
 ---
 

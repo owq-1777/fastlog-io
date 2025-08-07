@@ -1,8 +1,7 @@
 import logging
 
-from loguru import logger
-
-from .helpers import generate_id
+from .core import logger
+from .util import generate_id
 
 
 class InterceptHandler(logging.Handler):
@@ -41,9 +40,17 @@ def reset_std_logging() -> None:
     root.setLevel(logging.WARNING)
 
 
-def reset_uvicorn_logging() -> None:
-    # Capture the uvicorn log correctly to prevent duplicate output
-    for name in ('uvicorn', 'uvicorn.error', 'uvicorn.access'):
-        logging.getLogger(name).handlers.clear()
-        logging.getLogger(name).propagate = False
-    logging.getLogger('uvicorn').handlers = [InterceptHandler()]
+def reset_fastapi_logging() -> None:
+    loggers = (
+        'uvicorn',
+        'uvicorn.access',
+        'uvicorn.error',
+        'fastapi',
+        'asyncio',
+        'starlette',
+    )
+
+    for logger_name in loggers:
+        logging_logger = logging.getLogger(logger_name)
+        logging_logger.handlers.clear()
+        logging_logger.propagate = True
