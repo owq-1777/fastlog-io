@@ -30,13 +30,14 @@ classifiers = [
   "Topic :: System :: Logging"
 ]
 
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/fastlog"]
 
+[tool.uv]
+package = true
+
 [tool.ruff]
 line-length = 128
-
 
 [tool.ruff.format]
 quote-style = "single"
