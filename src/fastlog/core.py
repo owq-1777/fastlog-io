@@ -26,7 +26,7 @@ class Logger(_Logger):
 
     @contextmanager
     def trace_ctx(self, trace_id: str | None = None, **keyword):
-        trace_id = trace_id or generate_id(8)
+        trace_id = trace_id or generate_id()
         if _context.get().get('trace_id'):
             with self.contextualize(sub_trace_id=trace_id, **keyword):
                 yield
@@ -57,14 +57,14 @@ class InterceptHandler(logging.Handler):
             depth += 1
 
         logger.opt(depth=depth, exception=record.exc_info).bind(
-            action=f'[{record.name}]{record.module}.{record.funcName}:{record.lineno}',
+            action=f'[{record.name}]{record.module}.{record.funcName}:{record.lineno}'.replace('<', '\\<'),
             trace_id=self._track_id(record.name),
         ).log(level, record.getMessage())
 
     @classmethod
     def _track_id(cls, name: str) -> str:
         if name not in cls._cache:
-            cls._cache[name] = f'-{generate_id(6, digits=True)}-'
+            cls._cache[name] = generate_id()
         return cls._cache[name]
 
 
@@ -105,7 +105,7 @@ def patch_trace(record: Mapping[str, Any]) -> None:
     elif sub_trace_id:
         trace_id = sub_trace_id
     elif not trace_id:
-        trace_id = f'-{generate_id(7)}'
+        trace_id = generate_id()
     record['extra']['trace_id'] = trace_id
 
 
@@ -129,16 +129,16 @@ logger = Logger(
 
 
 def configure(
-    log_dir: str | Path | None = None,
     level: str | None = None,
+    log_path: str | Path | None = None,
     rotation: str | None = None,
     retention: str | None = None,
 ) -> None:
     cfg_kwargs = dict()
-    if log_dir is not None:
-        cfg_kwargs['log_dir'] = Path(log_dir)
     if level is not None:
         cfg_kwargs['level'] = level.upper()
+    if log_path is not None:
+        cfg_kwargs['log_path'] = Path(log_path)
     if rotation is not None:
         cfg_kwargs['rotation'] = rotation
     if retention is not None:
@@ -174,10 +174,10 @@ def configure(
         enqueue=False,
     )
 
-    if cfg.log_dir:
+    if cfg.log_path:
         enqueue = sys.platform.startswith('linux')
         logger.add(
-            cfg.log_dir / 'app.log',
+            cfg.log_path,
             format=format_record,
             level=cfg.level,
             rotation=cfg.rotation,

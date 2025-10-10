@@ -9,7 +9,7 @@ class InterceptHandler(logging.Handler):
 
     _cache: dict[str, str] = {}
 
-    def emit(self, record: logging.LogRecord) -> None:  # noqa: D401
+    def emit(self, record: logging.LogRecord) -> None:
         try:
             level = logger.level(record.levelname).name
         except ValueError:
@@ -17,7 +17,7 @@ class InterceptHandler(logging.Handler):
 
         frame, depth = logging.currentframe(), 2
         while frame and frame.f_code.co_filename == logging.__file__:
-            frame = frame.f_back  # type: ignore[assignment]
+            frame = frame.f_back
             depth += 1
 
         logger.opt(depth=depth, exception=record.exc_info).bind(
@@ -28,7 +28,7 @@ class InterceptHandler(logging.Handler):
     @classmethod
     def _track_id(cls, name: str) -> str:
         if name not in cls._cache:
-            cls._cache[name] = f'-{generate_id(6, digits=True)}-'
+            cls._cache[name] = generate_id()
         return cls._cache[name]
 
 

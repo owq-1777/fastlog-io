@@ -7,10 +7,9 @@ from pathlib import Path
 class Config:
     """Holds runtime configuration for logging."""
 
-    # Directory for log files. Defaults to None or $LOG_DIR env var
-    log_dir: Path | None = Path(str(os.getenv('LOG_DIR'))) if os.getenv('LOG_DIR') else None
     # Minimum log level. Can be overwritten with $LOG_LEVEL
     level: str = os.getenv('LOG_LEVEL', 'INFO').upper()
+    log_path: Path | None = Path(str(os.getenv('LOG_DIR'))) if os.getenv('LOG_DIR') else None
     # Loguru rotation policy (e.g. '100 MB' or '1 day').
     rotation: str = os.getenv('LOG_ROTATION', '100 MB')
     # Loguru retention policy (e.g. '30 days' or '10' files).

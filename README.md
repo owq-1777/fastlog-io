@@ -22,11 +22,11 @@
 
 ## ✨ Features
 
-* **Zero‑config out of the box** – `from fastlog-io import log; log.info("hello")` works instantly.
-* **Unified interface** – `configure()` + `get_log(name)` keep formatting consistent across modules.
-* **Automatic `trace_id`** – generates a 7‑char NanoID when none is bound, perfect for request tracing.
-* **File rotation & retention** – default `rotation="100 MB"`; tune it via `configure()`.
-* **Stdlib compatibility** – built‑in `reset_std_logging()` redirects the `logging` module to fastlog-io.
+* **Zero‑config logger** – `from fastlog import log; log.info("hello")` works instantly.
+* **Automatic `trace_id`** – 7‑character NanoID is injected when none is bound, ideal for tracing.
+* **Configurable rotation & retention** – ship with sane defaults (`100 MB` rotation) and tweak via `configure()`.
+* **Stdlib interception** – `reset_std_logging()` routes the standard `logging` module through fastlog.
+* **Directory watcher & notifier** – `MultiLogWatcher` tails rotating `*.log` families, persists offsets, and forwards new lines over HTTP and/or Telegram.
 
 ---
 
@@ -46,36 +46,83 @@ pip install fastlog-io
 ## ⚡ Quickstart
 
 ```python
-from fastlog import log, configure
+import logging
+
+from fastlog import configure, log
 
 # override defaults if needed
-configure(level="DEBUG", log_dir="./logs")
+configure(
+    level='DEBUG',
+    log_path='./logs/app.log',
+    rotation='10 MB',
+    retention='7 days',
+)
 
-log.info("service started")
+log.info('service started')
 
-# child logger
-api_log = log.bind(name="api")
-api_log.debug("new request")
+# standard logging is intercepted automatically
+logging.getLogger('my-app').warning('cache miss')
+
+# add trace context
+with log.trace_ctx():
+    log.error('request failed')
+    # use custom actions
+    log.bind(action='api.call').info('request done')
 ```
 
 Console output (colours stripped):
 
 ```
-2025-06-21 09:57:56.510 | INFO     | app   | -cFZrY2V | main.<module>:7 | service started
-2025-06-21 09:57:56.511 | DEBUG    | api   | -25bJVku | main.<module>:11 | new request
+2025-10-13 12:23:00.193 | INFO     | 3hAhb3OFpU7zXKWBwp | ts.<module>:13 | service started
+2025-10-13 12:23:00.194 | WARNING  | 1F1FwLwm4Orok0gs0a | [my-app]ts.<module>:16 | cache miss
+2025-10-13 12:23:00.194 | ERROR    | WG8yiDxzO3MCmWy8CB | ts.<module>:20 | request failed
+2025-10-13 12:23:00.194 | INFO     | WG8yiDxzO3MCmWy8CB | api.call     | request done
 ```
 
 ---
 
+## 🖥️ Directory watcher CLI
+
+FastLOG ships with a CLI that tails a directory of `*.log` files, resumes from persisted byte offsets, and forwards high‑severity bursts.
+
+```bash
+# Watch ./logs, post notifications to HTTP and Telegram
+python -m fastlog ./logs \
+  --endpoint "$FASTLOG_NOTIFY_ENDPOINT" \
+  --min-level ERROR
+
+# Or send to Telegram
+python -m fastlog ./logs \
+  --tg-token "$FASTLOG_NOTIFY_TG_TOKEN" \
+  --tg-chat-id "$FASTLOG_NOTIFY_TG_CHAT_ID"
+  --min-level ERROR
+
+# show all options
+python -m fastlog --help
+```
+
+Key behaviour:
+
+* Rotations/renames are detected; offsets are stored in `.multilogwatch.state.json`.
+* Notifications are batched, deduplicated, and retried up to three times per transport.
+* Telegram delivery is optional—provide both `--tg-token` and `--tg-chat-id` (or matching env vars).
+
 ## 🔧 Environment variables
 
-| Variable       | Default   | Description                                           |
-| -------------- | --------- | ----------------------------------------------------- |
-| `LOG_DIR`      | *(empty)* | Log file directory; leave blank to log to stderr only |
-| `LOG_LEVEL`    | `INFO`    | Minimum log level                                     |
-| `LOG_ROTATION` | `100 MB`  | File rotation policy (Loguru syntax)                  |
+| Variable | Default | Description |
+| --- | --- | --- |
+| `LOG_DIR` | *(empty)* | Log file directory; leave blank to log to stderr only |
+| `LOG_LEVEL` | `INFO` | Minimum log level for `configure()` |
+| `LOG_ROTATION` | `100 MB` | File rotation policy (Loguru syntax) |
+| `FASTLOG_NOTIFY_ENDPOINT` | *(empty)* | HTTP endpoint used by the CLI watcher |
+| `FASTLOG_NOTIFY_LEVEL` | *(empty)* | Minimum notification level override |
+| `FASTLOG_NOTIFY_TIMEOUT` | *(empty)* | HTTP timeout override (seconds) |
+| `FASTLOG_NOTIFY_WINDOW_MINUTES` | `1.0` | Aggregation window for batching |
+| `FASTLOG_NOTIFY_MAX_BYTES` | `4096` | Maximum payload size per request |
+| `FASTLOG_NOTIFY_TG_TOKEN` | *(empty)* | Telegram bot token for watcher notifications |
+| `FASTLOG_NOTIFY_TG_CHAT_ID` | *(empty)* | Telegram chat ID for watcher notifications |
 
-> These can also be passed directly to `configure()` and override environment values.
+Variables can also be supplied as CLI flags; command‑line arguments take precedence over environment values.
 
 ---
 
