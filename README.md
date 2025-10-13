@@ -1,7 +1,7 @@
 <p align="center">
   <br>
   <a href="https://github.com/owq-1777/fastlog-io">
-  	<img src="https://img.owq.world/2025/fastlog-logo-857f7d.png" alt="FastLOG">
+  	<img src="https://github.com/owq-1777/fastlog-io/raw/main/assets/fastlog.png" alt="FastLOG">
   </a>
 </p>
 
