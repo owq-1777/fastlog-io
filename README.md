@@ -86,19 +86,21 @@ Console output (colours stripped):
 FastLOG ships with a CLI that tails a directory of `*.log` files, resumes from persisted byte offsets, and forwards high‑severity bursts.
 
 ```bash
+uv tool install fastlog-io
+
 # Watch ./logs, post notifications to HTTP and Telegram
-python -m fastlog ./logs \
+uv run fastlog ./logs \
   --endpoint "$FASTLOG_NOTIFY_ENDPOINT" \
   --min-level ERROR
 
 # Or send to Telegram
-python -m fastlog ./logs \
+uv run fastlog ./logs \
   --tg-token "$FASTLOG_NOTIFY_TG_TOKEN" \
   --tg-chat-id "$FASTLOG_NOTIFY_TG_CHAT_ID"
   --min-level ERROR
 
 # show all options
-python -m fastlog --help
+uv run fastlog --help
 ```
 
 Key behaviour:

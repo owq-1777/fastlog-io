@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name            = "fastlog-io"
-version         = "0.2.0"
+version         = "0.2.1"
 description     = "loguru fast wrapping supports fastapi"
 readme          = "README.md"
 license         = { text = "MIT License" }
@@ -49,3 +49,6 @@ line-ending = "auto"
 dev = [
     "pre-commit>=4.2.0",
 ]
+
+[project.scripts]
+fastlog = "fastlog.cli:main"
