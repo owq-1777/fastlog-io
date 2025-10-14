@@ -113,7 +113,7 @@ Key behaviour:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `LOG_DIR` | *(empty)* | Log file directory; leave blank to log to stderr only |
+| `LOG_PATH` | *(empty)* | Log file path; leave blank to log to stderr only |
 | `LOG_LEVEL` | `INFO` | Minimum log level for `configure()` |
 | `LOG_ROTATION` | `100 MB` | File rotation policy (Loguru syntax) |
 | `FASTLOG_NOTIFY_ENDPOINT` | *(empty)* | HTTP endpoint used by the CLI watcher |

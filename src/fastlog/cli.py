@@ -36,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         '--min-level',
         default=os.getenv('FASTLOG_NOTIFY_LEVEL'),
-        help='Minimum log level to forward (e.g. INFO, WARNING). '
+        help='Minimum log level to forward (e.g. WARNING, ERROR). '
         'Defaults to Config.level or $FASTLOG_NOTIFY_LEVEL if provided.',
     )
     parser.add_argument(
@@ -53,48 +53,6 @@ def build_parser() -> argparse.ArgumentParser:
         '--max-bytes',
         default=os.getenv('FASTLOG_NOTIFY_MAX_BYTES', '4096'),
         help='Maximum payload size per POST in bytes (default: 4096).',
-    )
-    parser.add_argument(
-        '--fast-interval',
-        type=float,
-        default=0.05,
-        help='Fast polling interval in seconds when new data is detected.',
-    )
-    parser.add_argument(
-        '--slow-interval',
-        type=float,
-        default=1.0,
-        help='Maximum backoff polling interval in seconds.',
-    )
-    parser.add_argument(
-        '--backoff',
-        type=float,
-        default=2.0,
-        help='Exponential backoff factor applied when no data is available.',
-    )
-    parser.add_argument(
-        '--flush-interval',
-        type=float,
-        default=1.0,
-        help='Minimum seconds between stdout flush attempts.',
-    )
-    parser.add_argument(
-        '--rr-batch',
-        type=int,
-        default=64,
-        help='Maximum number of lines read per family in a single round.',
-    )
-    parser.add_argument(
-        '--state-flush-interval',
-        type=float,
-        default=0.8,
-        help='Minimum seconds between state persistence flushes.',
-    )
-    parser.add_argument(
-        '--read-chunk',
-        type=int,
-        default=8192,
-        help='Binary chunk size used when reading the log files.',
     )
     return parser
 
@@ -151,13 +109,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     watcher = MultiLogWatcher(
         dirpath=args.log_dir,
         state_path=state_path,
-        fast_interval=args.fast_interval,
-        slow_interval=args.slow_interval,
-        backoff=args.backoff,
-        flush_interval=args.flush_interval,
-        rr_batch=args.rr_batch,
-        state_flush_interval=args.state_flush_interval,
-        read_chunk=args.read_chunk,
         handler=handler,
     )
 

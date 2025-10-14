@@ -230,9 +230,12 @@ class LogNotificationHandler(BaseLogHandler):
             for tid, ps in traces.items():
                 lines.append(tid)
                 for p in ps:
-                    msg = (p.entry.message or '').replace('\n', '\\n')
+                    msg = (p.entry.message or '-').replace('\n', '\\n')
                     lvl = p.entry.level or 'UNKNOWN'
-                    lines.append(f'  {lvl} | x{p.count} {msg}' if p.count > 1 else f'  {lvl} | {msg}')
+                    action = p.entry.action or '-'
+                    lines.append(f'  {lvl} | {action}')
+                    prefix = f'    x{p.count} ' if p.count > 1 else '    '
+                    lines.append(f'{prefix}{msg}')
             if i < len(families) - 1:
                 lines.append('---')
 
