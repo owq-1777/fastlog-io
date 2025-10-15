@@ -18,20 +18,28 @@ __all__ = [
     'LogNotificationHandler',
 ]
 
-logger = logging.getLogger(__name__)
+# -------------------------
+# Constants & Logger
+# -------------------------
 
+# ANSI escape removal
 ANSI_ESCAPE_RE = re.compile(r'\x1b\[[0-9;]*m')
+
+# Only keep normalized level keys here.
 LEVEL_WEIGHTS: dict[str, int] = {
-    'TRACE': 10,
     'DEBUG': 20,
     'INFO': 30,
-    'SUCCESS': 35,
     'WARNING': 40,
-    'WARN': 40,
     'ERROR': 50,
     'CRITICAL': 60,
-    'FATAL': 60,
 }
+
+logger = logging.getLogger(__name__)
+
+
+# -------------------------
+# Utilities
+# -------------------------
 
 
 def strip_ansi(value: str) -> str:
@@ -39,14 +47,16 @@ def strip_ansi(value: str) -> str:
 
 
 def _normalize_level(level: str | None) -> str:
+    """Normalize level aliases to standard keys used in LEVEL_WEIGHTS."""
     if not level:
         return 'UNKNOWN'
     up = level.upper()
-    if up == 'WARN':
-        return 'WARNING'
-    if up == 'FATAL':
-        return 'CRITICAL'
-    return up
+    return {'WARN': 'WARNING', 'FATAL': 'CRITICAL', 'SUCCESS': 'INFO'}.get(up, up)
+
+
+# -------------------------
+# API Types
+# -------------------------
 
 
 class BaseLogHandler(ABC):
@@ -90,8 +100,115 @@ class _Pending:
     primary: bool
 
 
+class _TraceGroup:
+    __slots__ = ('items', 'has_primary')
+
+    def __init__(self) -> None:
+        self.items: list[_Pending] = []
+        self.has_primary = False
+
+
+# -------------------------
+# Transports (decoupled)
+# -------------------------
+
+
+class _HttpTransport:
+    def __init__(
+        self,
+        endpoint: str,
+        headers: dict[str, str],
+        timeout: float,
+        retry: Callable[[Callable[[], urllib.request.Request], Callable[[Any], None], str, int], None],
+    ) -> None:
+        self.endpoint = endpoint
+        self.headers = dict(headers)  # defensive copy
+        self.timeout = timeout
+        self._retry = retry
+
+    def send(self, payload: bytes) -> None:
+        headers = dict(self.headers)
+        headers.setdefault('User-Agent', 'LogNotifier/1.0')
+
+        def build_request() -> urllib.request.Request:
+            return urllib.request.Request(
+                self.endpoint,
+                data=payload,
+                headers=headers,
+                method='POST',
+            )
+
+        def on_success(response: Any) -> None:
+            status = getattr(response, 'status', None)
+            if status is not None:
+                logger.info(f'HTTP notification delivered (status={status}, bytes={len(payload)})')
+            else:
+                logger.info(f'HTTP notification delivered (bytes={len(payload)})')
+
+        self._retry(build_request, on_success, 'HTTP notification', 3)
+
+
+class _TelegramTransport:
+    def __init__(
+        self,
+        telegram_url: str,
+        chat_id: str,
+        timeout: float,
+        retry: Callable[[Callable[[], urllib.request.Request], Callable[[Any], None], str, int], None],
+    ) -> None:
+        self.telegram_url = telegram_url
+        self.chat_id = chat_id
+        self.timeout = timeout
+        self._retry = retry
+
+    def send(self, payload: bytes) -> None:
+        text = payload.decode('utf-8', 'replace')
+        max_len = 4096
+        if len(text) > max_len:
+            text = text[: max_len - 1] + '…'
+        body = {
+            'chat_id': self.chat_id,
+            'text': text,
+            'disable_web_page_preview': 'true',
+        }
+        data = urllib.parse.urlencode(body).encode('utf-8')
+        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+
+        def build_request() -> urllib.request.Request:
+            return urllib.request.Request(
+                self.telegram_url,
+                data=data,
+                headers=headers,
+                method='POST',
+            )
+
+        def on_success(response: Any) -> None:
+            status = getattr(response, 'status', None)
+            if status is not None:
+                logger.info(f'Telegram notification delivered (status={status})')
+            else:
+                logger.info('Telegram notification delivered')
+
+        self._retry(build_request, on_success, 'Telegram notification', 3)
+
+
+# -------------------------
+# LogNotificationHandler
+# -------------------------
+
+
 class LogNotificationHandler(BaseLogHandler):
-    """Batch log notifications, deduplicate, and deliver over HTTP."""
+    """Batch log notifications, deduplicate, and deliver over HTTP/Telegram.
+
+    Behavior:
+      - Lines are buffered via `handle()`.
+      - A "primary" line (>= min_level) triggers a sending window.
+      - If `debounce=False` (default): first primary sets a fixed deadline (tumbling window).
+      - If `debounce=True` : every primary pushes the deadline forward (debounce window).
+      - Repeated adjacent lines are coalesced using `_dedup_key()`.
+      - `flush_expired()` lets external code drive deadline checks if new lines are infrequent.
+      - `flush()` forces a send of ALL buffered lines (ignores min_level).
+    """
 
     def __init__(
         self,
@@ -104,6 +221,8 @@ class LogNotificationHandler(BaseLogHandler):
         config: Config | None = None,
         window_minutes: float = 1.0,
         max_bytes: int = 4096,
+        *,
+        debounce: bool = False,
     ) -> None:
         """Initialize notification delivery.
 
@@ -111,26 +230,24 @@ class LogNotificationHandler(BaseLogHandler):
             endpoint: Destination URL for log payloads. Optional if Telegram is configured.
             telegram_token: Optional Telegram bot token for Telegram delivery.
             telegram_chat_id: Target Telegram chat ID used when sending messages.
-            min_level: Minimum severity that triggers delivery.
+            min_level: Minimum severity that triggers delivery (treats aliases via normalization).
             timeout: HTTP timeout in seconds for each POST.
             headers: Extra HTTP headers merged with defaults.
             config: Optional Config override for default levels.
             window_minutes: Delay window before sending accumulated logs.
-            max_bytes: Maximum payload size in bytes, enforcing truncation.
+            max_bytes: Maximum payload size in bytes; payload will be truncated to fit.
+            debounce: If True, extend the deadline on every primary line (debounce window).
         """
         if not endpoint and not (telegram_token and telegram_chat_id):
             raise ValueError('Either endpoint or both telegram_token and telegram_chat_id must be provided')
         if bool(telegram_token) != bool(telegram_chat_id):
             raise ValueError('telegram_token and telegram_chat_id must be provided together')
 
-        self.endpoint = endpoint
-        self.telegram_token = telegram_token
-        self.telegram_chat_id = telegram_chat_id
-        self._telegram_url: str | None = f'https://api.telegram.org/bot{telegram_token}/sendMessage' if telegram_token else None
         self.timeout = timeout
         self.headers = {'Content-Type': 'text/plain; charset=utf-8'}
         if headers:
-            self.headers.update(headers)
+            # merge but don't mutate caller's dict
+            self.headers.update(dict(headers))
 
         self.config = config or Config()
         resolved = _normalize_level((min_level or self.config.level))
@@ -139,12 +256,25 @@ class LogNotificationHandler(BaseLogHandler):
 
         self.window_seconds = max(0.1, float(window_minutes) * 60.0)
         self.max_bytes = max(512, int(max_bytes))
+        self._debounce = debounce
 
+        # Buffer state
         self._entries: list[_Pending] = []
         self._deadline: float | None = None
         self._has_primary = False
 
+        # Build transports
+        self._transports: list[Any] = []
+        if endpoint:
+            self._transports.append(_HttpTransport(endpoint, self.headers, self.timeout, self._send_with_retry))
+        if telegram_token and telegram_chat_id:
+            telegram_url = f'https://api.telegram.org/bot{telegram_token}/sendMessage'
+            self._transports.append(_TelegramTransport(telegram_url, telegram_chat_id, self.timeout, self._send_with_retry))
+
+    # ---------- Public API ----------
+
     def handle(self, line: str, family: str) -> None:
+        """Ingest one log line; may open/close a window and trigger sending."""
         now = time.monotonic()
         self._flush_if_due(now)
 
@@ -162,40 +292,54 @@ class LogNotificationHandler(BaseLogHandler):
 
         if is_primary:
             self._has_primary = True
-            if self._deadline is None:
+            if self._debounce:
+                # Debounce: push the window every time a primary arrives
                 self._deadline = now + self.window_seconds
-            elif now >= self._deadline:
-                self._flush(now)
+            else:
+                # Tumbling: only the first primary sets the deadline
+                if self._deadline is None:
+                    self._deadline = now + self.window_seconds
+                elif now >= self._deadline:
+                    self._flush()
 
     def flush(self) -> None:
-        while self._entries:
-            self._flush(time.monotonic(), force=True)
+        """Force sending ALL buffered logs immediately (ignore min_level)."""
+        self._flush(force=True)
 
     def flush_expired(self) -> None:
+        """Check the deadline against current time and flush if elapsed."""
         self._flush_if_due(time.monotonic())
 
+    # ---------- Internal helpers ----------
+
     @staticmethod
-    def _is_dup(a: LogEntry, b: LogEntry) -> bool:
+    def _dedup_key(e: LogEntry) -> tuple[str, str, str, str, str]:
+        """Key for adjacent duplicate folding."""
         return (
-            a.family == b.family
-            and (a.level or '') == (b.level or '')
-            and (a.action or '') == (b.action or '')
-            and (a.message or '') == (b.message or '')
+            e.family,
+            e.trace_id or '',
+            e.level or '',
+            e.action or '',
+            e.message or '',
         )
+
+    @classmethod
+    def _is_dup(cls, a: LogEntry, b: LogEntry) -> bool:
+        return cls._dedup_key(a) == cls._dedup_key(b)
 
     def _flush_if_due(self, now: float) -> None:
         if not self._entries or not self._has_primary or self._deadline is None:
             return
         if now >= self._deadline:
-            self._flush(now)
+            self._flush()
 
-    def _flush(self, now: float, *, force: bool = False) -> None:
+    def _flush(self, *, force: bool = False) -> None:
         if not self._entries:
             return
         if not (self._has_primary or force):
             return
 
-        payload = self._build_payload(self._entries)
+        payload = self._build_payload(self._entries, include_all=force)
         if payload is None:
             self._clear_buffer()
             return
@@ -208,36 +352,45 @@ class LogNotificationHandler(BaseLogHandler):
         self._deadline = None
         self._has_primary = False
 
-    def _build_payload(self, items: list[_Pending]) -> bytes | None:
-        by_family: dict[str, dict[str, list[_Pending]]] = {}
-        for p in items:
-            fam = p.entry.family
-            tid = p.entry.trace_id or '(no-trace)'
-            by_family.setdefault(fam, {}).setdefault(tid, []).append(p)
-
-        families: list[tuple[str, dict[str, list[_Pending]]]] = []
-        for fam, traces in by_family.items():
-            filtered = {tid: ps for tid, ps in traces.items() if any(x.primary for x in ps)}
-            if filtered:
-                families.append((fam, filtered))
-
-        if not families:
-            return None
+    def _build_payload(self, items: list[_Pending], *, include_all: bool = False) -> bytes | None:
+        """Build the text payload. When include_all=True, do not filter by primary."""
+        by_family: dict[str, dict[str, _TraceGroup]] = {}
+        for pending in items:
+            entry = pending.entry
+            fam_groups = by_family.setdefault(entry.family, {})
+            trace_id = entry.trace_id or 'trace:-'
+            group = fam_groups.get(trace_id)
+            if group is None:
+                group = _TraceGroup()
+                fam_groups[trace_id] = group
+            group.items.append(pending)
+            if pending.primary:
+                group.has_primary = True
 
         lines: list[str] = []
-        for i, (fam, traces) in enumerate(families):
-            lines.append(f'[{fam}]')
-            for tid, ps in traces.items():
-                lines.append(tid)
-                for p in ps:
-                    msg = (p.entry.message or '-').replace('\n', '\\n')
-                    lvl = p.entry.level or 'UNKNOWN'
-                    action = p.entry.action or '-'
-                    lines.append(f'  {lvl} | {action}')
-                    prefix = f'    x{p.count} ' if p.count > 1 else '    '
-                    lines.append(f'{prefix}{msg}')
-            if i < len(families) - 1:
-                lines.append('---')
+        family_emitted = False
+        for family, traces in by_family.items():
+            emitted_this_family = False
+            for trace_id, group in traces.items():
+                if not include_all and not group.has_primary:
+                    continue
+                if not emitted_this_family:
+                    if family_emitted:
+                        lines.append('---')
+                    lines.append(f'[{family}]')
+                    emitted_this_family = True
+                    family_emitted = True
+                lines.append(f'\n{trace_id}')
+                for pending in group.items:
+                    entry = pending.entry
+                    message = (entry.message or '-').replace('\n', '\\n')
+                    level = entry.level or 'UNKNOWN'
+                    action = entry.action or '-'
+                    prefix = f'    x{pending.count} ' if pending.count > 1 else '    '
+                    lines.extend((f'  {level} | {action}', f'{prefix}{message}'))
+
+        if not lines:
+            return None
 
         return self._shrink_and_encode(lines)
 
@@ -258,58 +411,8 @@ class LogNotificationHandler(BaseLogHandler):
         return b'[trimmed]'
 
     def _send(self, payload: bytes) -> None:
-        if self.endpoint:
-            self._send_http(payload)
-        if self._telegram_url:
-            self._send_telegram(payload)
-
-    def _send_http(self, payload: bytes) -> None:
-        def build_request() -> urllib.request.Request:
-            return urllib.request.Request(
-                self.endpoint,  # type: ignore[arg-type]
-                data=payload,
-                headers=self.headers,
-                method='POST',
-            )
-
-        def on_success(response: Any) -> None:
-            status = getattr(response, 'status', None)
-            if status is not None:
-                logger.info(f'HTTP notification delivered (status={status}, bytes={len(payload)})')
-            else:
-                logger.info(f'HTTP notification delivered (bytes={len(payload)})')
-
-        self._send_with_retry(build_request, on_success, 'HTTP notification')
-
-    def _send_telegram(self, payload: bytes) -> None:
-        text = payload.decode('utf-8', 'replace')
-        max_len = 4096
-        if len(text) > max_len:
-            text = text[: max_len - 1] + '…'
-        body = {
-            'chat_id': self.telegram_chat_id,
-            'text': text,
-            'disable_web_page_preview': True,
-        }
-        data = urllib.parse.urlencode(body).encode('utf-8')
-        headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-
-        def build_request() -> urllib.request.Request:
-            return urllib.request.Request(
-                self._telegram_url,  # type: ignore[arg-type]
-                data=data,
-                headers=headers,
-                method='POST',
-            )
-
-        def on_success(response: Any) -> None:
-            status = getattr(response, 'status', None)
-            if status is not None:
-                logger.info(f'Telegram notification delivered (status={status})')
-            else:
-                logger.info('Telegram notification delivered')
-
-        self._send_with_retry(build_request, on_success, 'Telegram notification')
+        for t in self._transports:
+            t.send(payload)
 
     def _send_with_retry(
         self,

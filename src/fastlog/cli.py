@@ -35,9 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         '--min-level',
-        default=os.getenv('FASTLOG_NOTIFY_LEVEL'),
+        default=os.getenv('FASTLOG_NOTIFY_LEVEL', 'ERROR'),
         help='Minimum log level to forward (e.g. WARNING, ERROR). '
-        'Defaults to Config.level or $FASTLOG_NOTIFY_LEVEL if provided.',
+        'Defaults to Config.level or $FASTLOG_NOTIFY_LEVEL if provided (default: ERROR).',
     )
     parser.add_argument(
         '--timeout',

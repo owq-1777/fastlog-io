@@ -1,7 +1,6 @@
 import sys
 from contextlib import contextmanager
 from pathlib import Path
-from pprint import pformat
 from typing import Any, Mapping
 
 import logging
@@ -147,21 +146,10 @@ def configure(
     cfg = Config(**cfg_kwargs)
 
     def format_record(record: Mapping[str, Any]) -> str:
-        """
-        Custom format for loguru loggers.
-        Uses pformat for log any data like request/response body during debug.
-        Works with logging if loguru handler it.
-        """
-
         loguru_format = cfg.format
         if action := record['extra'].get('action'):
             loguru_format = loguru_format.replace(cfg.action_format, f'{action: <12}')
 
-        if payload := record['extra'].get('payload'):
-            record['extra']['payload'] = pformat(payload, indent=4, compact=True, width=88)
-            loguru_format += '\n<level>{extra[payload]}</level>'
-
-        loguru_format += '{exception}\n'
         return loguru_format
 
     logger.remove()
