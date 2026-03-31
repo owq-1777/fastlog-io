@@ -9,4 +9,7 @@ wheels/
 # Virtual environments
 .venv
 
+# Local-only OTLP smoke scripts (not tracked)
+scripts/smoke*.py
+
 ts.*

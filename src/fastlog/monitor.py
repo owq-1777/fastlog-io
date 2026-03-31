@@ -568,12 +568,19 @@ class MultiLogWatcher:
             except Exception:
                 pass
 
-            flush = getattr(self.handler, 'flush', None)
-            if callable(flush):
+            close = getattr(self.handler, 'close', None)
+            if callable(close):
                 try:
-                    flush()
+                    close()
                 except Exception:
                     pass
+            else:
+                flush = getattr(self.handler, 'flush', None)
+                if callable(flush):
+                    try:
+                        flush()
+                    except Exception:
+                        pass
             logger.info(f'Stopped MultiLogWatcher on {self.dir}')
 
     def _attach_new_families_from_cache(self):
