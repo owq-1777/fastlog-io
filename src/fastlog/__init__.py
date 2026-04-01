@@ -1,7 +1,7 @@
 import atexit as _atexit
 from .core import configure, logger
 
-__all__ = ['configure', 'log', 'cli']
+__all__ = ['configure', 'log']
 
 log = logger
 
