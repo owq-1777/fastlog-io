@@ -6,6 +6,7 @@ import queue
 import re
 import threading
 import time
+import json
 import urllib.error
 import urllib.request
 import urllib.parse
@@ -79,7 +80,45 @@ class LogEntry:
     level: str | None = None
     trace_id: str | None = None
     action: str | None = None
+    attrs: dict[str, str] | None = None
     message: str | None = None
+
+
+def _parse_structured_extra(value: str | None) -> dict[str, str] | None:
+    if value is None:
+        return None
+    raw = value.strip()
+    if not raw or raw == '-':
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {'raw_extra': raw}
+    if not isinstance(payload, dict):
+        return {'raw_extra': raw}
+    out: dict[str, str] = {}
+    for key, item in payload.items():
+        out[str(key)] = str(item)
+    return out or None
+
+
+def _split_structured_extra_and_message(value: str) -> tuple[str | None, str]:
+    raw = value.strip()
+    if not raw:
+        return None, ''
+    if raw.startswith('- | '):
+        return '-', raw[4:]
+    if raw == '-':
+        return '-', ''
+    if raw.startswith('{'):
+        try:
+            _, end = json.JSONDecoder().raw_decode(raw)
+        except json.JSONDecodeError:
+            return None, value
+        remainder = raw[end:]
+        if remainder.startswith(' | '):
+            return raw[:end], remainder[3:]
+    return None, value
 
 
 def parse_log_line(line: str, family: str) -> LogEntry:
@@ -93,7 +132,12 @@ def parse_log_line(line: str, family: str) -> LogEntry:
         entry.level = parts[1].strip().upper() or None
         entry.trace_id = parts[2].strip() or None
         entry.action = parts[3].strip() or None
-        entry.message = parts[4].strip() or None
+        structured_extra, message = _split_structured_extra_and_message(parts[4])
+        if structured_extra is not None:
+            entry.attrs = _parse_structured_extra(structured_extra)
+            entry.message = message.strip() or None
+        else:
+            entry.message = parts[4].strip() or None
     else:
         entry.message = cleaned.strip() or None
     return entry
@@ -245,7 +289,7 @@ class LogNotificationHandler(BaseLogHandler):
         telegram_token: str | None = None,
         telegram_chat_id: str | None = None,
         min_level: str | None = None,
-        timeout: float = 5.0,
+        timeout: float | None = None,
         headers: dict[str, str] | None = None,
         config: Config | None = None,
         window_seconds: float = 30.0,
@@ -253,6 +297,7 @@ class LogNotificationHandler(BaseLogHandler):
         otlp_endpoint: str | None = None,
         otlp_service_name: str | None = None,
         otlp_headers: dict[str, str] | None = None,
+        otlp_timeout: float | None = None,
         otlp_max_batch: int = 256,
         otlp_protocol: str | None = None,
         http_attempts: int = 3,
@@ -266,28 +311,32 @@ class LogNotificationHandler(BaseLogHandler):
             telegram_token: Optional Telegram bot token for Telegram delivery.
             telegram_chat_id: Target Telegram chat ID used when sending messages.
             min_level: Minimum severity that triggers delivery (treats aliases via normalization).
-            timeout: HTTP timeout in seconds for each POST.
+            timeout: HTTP/Telegram timeout in seconds for each POST (default 5).
             headers: Extra HTTP headers merged with defaults.
             config: Optional Config override for default levels.
             window_seconds: Aggregation window in seconds for all transports (OTLP, HTTP, Telegram).
             max_bytes: Maximum payload size in bytes; payload will be truncated to fit.
-            otlp_endpoint: OTLP collector URL (HTTP: ``.../v1/logs`` or ``:4318``; gRPC: ``https://host``). Requires fastlog-io[otlp].
-            otlp_service_name: service.name resource attribute (default: $OTEL_SERVICE_NAME or fastlog).
-            otlp_headers: Optional OTLP request headers (else exporter reads $OTEL_EXPORTER_OTLP_HEADERS).
+            otlp_endpoint: Explicit OTLP collector URL override; when unset, native OTel endpoint env applies.
+            otlp_service_name: Service namespace value; service.name is derived from log family.
+            otlp_headers: Optional OTLP request headers override (else exporter reads native OTel env).
+            otlp_timeout: Explicit OTLP exporter timeout override; when unset, native OTel timeout env applies.
             otlp_max_batch: Max log records per OTLP export request.
-            otlp_protocol: ``auto`` (default), ``http``, or ``grpc``; auto uses $FASTLOG_OTLP_PROTOCOL or heuristics.
+            otlp_protocol: ``auto`` (default), ``http``, or ``grpc``; auto uses $OTEL_EXPORTER_OTLP_LOGS_PROTOCOL or heuristics.
             http_attempts: Max attempts per HTTP/Telegram POST (default 3; same as historical behavior).
             debounce: If True, extend the deadline on every primary line (debounce window).
         """
         has_plain = bool(endpoint)
         has_tg = bool(telegram_token and telegram_chat_id)
-        has_otlp = bool(otlp_endpoint)
+        from .otlp_export import configured_otlp_endpoint
+
+        resolved_otlp_endpoint = configured_otlp_endpoint(otlp_endpoint)
+        has_otlp = bool(resolved_otlp_endpoint)
         if not has_plain and not has_tg and not has_otlp:
             raise ValueError('Provide --endpoint, or Telegram credentials, or --otlp-endpoint')
         if bool(telegram_token) != bool(telegram_chat_id):
             raise ValueError('telegram_token and telegram_chat_id must be provided together')
 
-        self.timeout = timeout
+        self.timeout = 5.0 if timeout is None else float(timeout)
         self._http_attempts = max(1, int(http_attempts))
         self.headers = {'Content-Type': 'text/plain; charset=utf-8'}
         if headers:
@@ -310,14 +359,14 @@ class LogNotificationHandler(BaseLogHandler):
         except metadata.PackageNotFoundError:
             self._package_version = '0.0.0'
 
-        self._otlp_service_name = (otlp_service_name or os.getenv('OTEL_SERVICE_NAME') or 'fastlog').strip()
+        self._otlp_service_name = (otlp_service_name or os.getenv('OTEL_SERVICE_NAME') or '').strip() or None
         self._otlp_max_batch = max(1, int(otlp_max_batch))
 
         self._otlp_exporter: Any | None = None
-        if otlp_endpoint:
+        if resolved_otlp_endpoint:
             from .otlp_export import otlp_dependencies_installed
 
-            if not otlp_dependencies_installed(otlp_endpoint, otlp_protocol):
+            if not otlp_dependencies_installed(resolved_otlp_endpoint, otlp_protocol):
                 raise ImportError(
                     'OTLP export requires optional dependencies (opentelemetry-sdk, OTLP exporters). '
                     'Install with: pip install "fastlog-io[otlp]"'
@@ -327,7 +376,7 @@ class LogNotificationHandler(BaseLogHandler):
             self._otlp_exporter = create_otlp_log_exporter(
                 otlp_endpoint,
                 headers=otlp_headers,
-                timeout=timeout,
+                timeout=otlp_timeout,
                 protocol=otlp_protocol,
             )
 
@@ -369,6 +418,10 @@ class LogNotificationHandler(BaseLogHandler):
             self._entries[-1].count += 1
             if is_primary:
                 self._entries[-1].primary = True
+            if e.attrs:
+                attrs = dict(self._entries[-1].entry.attrs or {})
+                attrs.update(e.attrs)
+                self._entries[-1].entry.attrs = attrs
         else:
             self._entries.append(_Pending(e, 1, now, is_primary))
 
@@ -417,7 +470,7 @@ class LogNotificationHandler(BaseLogHandler):
     # ---------- Internal helpers ----------
 
     @staticmethod
-    def _dedup_key(e: LogEntry) -> tuple[str, str, str, str, str]:
+    def _dedup_key(e: LogEntry) -> tuple[str, str, str, str, str, str]:
         """Key for adjacent duplicate folding."""
         return (
             e.family,
@@ -425,6 +478,7 @@ class LogNotificationHandler(BaseLogHandler):
             e.level or '',
             e.action or '',
             e.message or '',
+            json.dumps(e.attrs or {}, sort_keys=True, separators=(',', ':')),
         )
 
     @classmethod

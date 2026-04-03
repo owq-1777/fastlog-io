@@ -10,6 +10,7 @@ from typing import Any, Sequence
 
 __all__ = [
     'otlp_dependencies_installed',
+    'configured_otlp_endpoint',
     'resolve_otlp_protocol',
     'create_otlp_log_exporter',
     'level_to_severity',
@@ -27,6 +28,64 @@ def _module_available(module: str) -> bool:
     return find_spec(module) is not None
 
 
+def _is_secure_grpc_endpoint(endpoint: str | None) -> bool:
+    value = (endpoint or '').strip().lower()
+    return not value.startswith('http://')
+
+
+def _validate_file_env(env_name: str) -> None:
+    raw = os.getenv(env_name)
+    if raw is None:
+        return
+    path = raw.strip()
+    if not path:
+        raise ValueError(f'{env_name} is set but empty')
+    if not os.path.isfile(path):
+        raise ValueError(f'{env_name} points to a missing file: {path}')
+    if not os.access(path, os.R_OK):
+        raise ValueError(f'{env_name} is not readable: {path}')
+    if os.path.getsize(path) <= 0:
+        raise ValueError(f'{env_name} points to an empty file: {path}')
+
+
+def _validate_grpc_tls_env(endpoint: str | None) -> None:
+    if not _is_secure_grpc_endpoint(endpoint):
+        return
+    for env_name in (
+        'OTEL_EXPORTER_OTLP_LOGS_CERTIFICATE',
+        'OTEL_EXPORTER_OTLP_CERTIFICATE',
+        'OTEL_EXPORTER_OTLP_LOGS_CLIENT_CERTIFICATE',
+        'OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE',
+        'OTEL_EXPORTER_OTLP_LOGS_CLIENT_KEY',
+        'OTEL_EXPORTER_OTLP_CLIENT_KEY',
+        'GRPC_DEFAULT_SSL_ROOTS_FILE_PATH',
+        'SSL_CERT_FILE',
+    ):
+        _validate_file_env(env_name)
+
+
+def configured_otlp_endpoint(endpoint: str | None = None) -> str | None:
+    value = (endpoint or '').strip()
+    if value:
+        return value
+    for env_name in ('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT', 'OTEL_EXPORTER_OTLP_ENDPOINT', 'FASTLOG_OTLP_ENDPOINT'):
+        env_value = (os.getenv(env_name) or '').strip()
+        if env_value:
+            return env_value
+    return None
+
+
+def _normalize_otlp_protocol(value: str | None) -> str | None:
+    protocol = (value or '').strip().lower()
+    if protocol in ('', 'auto'):
+        return protocol or None
+    if protocol == 'http/protobuf':
+        return 'http'
+    if protocol in ('http', 'grpc'):
+        return protocol
+    return None
+
+
 def otlp_dependencies_installed(endpoint: str | None = None, protocol: str | None = None) -> bool:
     """Check whether the SDK and the exporter needed for the selected protocol are installed."""
     if not _module_available(_OTLP_SDK_LOGS_MODULE):
@@ -42,41 +101,61 @@ def otlp_dependencies_installed(endpoint: str | None = None, protocol: str | Non
     return _module_available(exporter_module)
 
 
-def resolve_otlp_protocol(endpoint: str, protocol: str | None) -> str:
+def resolve_otlp_protocol(endpoint: str | None, protocol: str | None) -> str:
     """Choose ``http`` (OTLP/HTTP) or ``grpc`` (OTLP/gRPC).
 
-    Precedence: explicit ``protocol`` (http/grpc) > ``$FASTLOG_OTLP_PROTOCOL`` > auto
+    Precedence: explicit ``protocol`` (http/grpc) > ``$OTEL_EXPORTER_OTLP_LOGS_PROTOCOL`` > auto
     (``/v1/logs`` or port ``4318`` → HTTP, else gRPC).
     """
-    p_cli = (protocol or '').strip().lower()
+    p_cli = _normalize_otlp_protocol(protocol)
     if p_cli in ('grpc', 'http'):
         return p_cli
-    env_p = (os.getenv('FASTLOG_OTLP_PROTOCOL') or '').strip().lower()
+    env_p = _normalize_otlp_protocol(os.getenv('OTEL_EXPORTER_OTLP_LOGS_PROTOCOL'))
     if env_p in ('grpc', 'http'):
         return env_p
-    if p_cli in ('auto', ''):
-        if 'v1/logs' in endpoint or ':4318' in endpoint:
+    env_p = _normalize_otlp_protocol(os.getenv('OTEL_EXPORTER_OTLP_PROTOCOL'))
+    if env_p in ('grpc', 'http'):
+        return env_p
+    resolved_endpoint = configured_otlp_endpoint(endpoint) or ''
+    if p_cli is None or p_cli == 'auto':
+        if 'v1/logs' in resolved_endpoint or ':4318' in resolved_endpoint:
             return 'http'
         return 'grpc'
-    raise ValueError(f'Invalid OTLP protocol: {protocol!r} (use auto, http, or grpc)')
+    raise ValueError(f'Invalid OTLP protocol: {protocol!r} (use auto, http, grpc, or http/protobuf)')
 
 
 def create_otlp_log_exporter(
-    endpoint: str,
+    endpoint: str | None,
     *,
     headers: dict[str, str] | None,
-    timeout: float,
+    timeout: float | None,
     protocol: str | None,
 ) -> Any:
     """Instantiate the OTLP log exporter for HTTP or gRPC."""
     proto = resolve_otlp_protocol(endpoint, protocol)
+    if proto == 'grpc':
+        _validate_grpc_tls_env(endpoint)
     if proto == 'http':
         from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 
-        return OTLPLogExporter(endpoint=endpoint, headers=headers, timeout=timeout)
+        kwargs: dict[str, Any] = {}
+        if endpoint is not None:
+            kwargs['endpoint'] = endpoint
+        if timeout is not None:
+            kwargs['timeout'] = timeout
+        if headers is not None:
+            kwargs['headers'] = headers
+        return OTLPLogExporter(**kwargs)
     from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter as GrpcOTLPLogExporter
 
-    return GrpcOTLPLogExporter(endpoint=endpoint, headers=headers, timeout=timeout)
+    kwargs: dict[str, Any] = {}
+    if endpoint is not None:
+        kwargs['endpoint'] = endpoint
+    if timeout is not None:
+        kwargs['timeout'] = timeout
+    if headers is not None:
+        kwargs['headers'] = headers
+    return GrpcOTLPLogExporter(**kwargs)
 
 
 def level_to_severity(level: str | None):
@@ -122,7 +201,7 @@ def entry_time_unix_ns(time_str: str | None) -> int:
 def build_read_write_records(
     pendings: Sequence[object],
     *,
-    service_name: str,
+    service_name: str | None,
     package_version: str,
 ) -> list:
     """Convert pending log lines to SDK ReadWriteLogRecord list.
@@ -134,13 +213,25 @@ def build_read_write_records(
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 
-    resource = Resource.create({'service.name': service_name})
     scope = InstrumentationScope(name='fastlog-io', version=package_version)
     out: list = []
 
     for p in pendings:
         entry = p.entry  # type: ignore[attr-defined]
         count = int(p.count)  # type: ignore[attr-defined]
+        resolved_service_name = (entry.family or '').strip() or service_name
+        resolved_environment = (os.getenv('RUN_ENV') or os.getenv('ENV') or '').strip()
+        resolved_service_version = (os.getenv('VERSION') or '').strip()
+        resource_attrs: dict[str, str] = {}
+        if resolved_environment:
+            resource_attrs['deployment.environment'] = resolved_environment
+        if resolved_service_name:
+            resource_attrs['service.name'] = resolved_service_name
+        if service_name:
+            resource_attrs['service.namespace'] = service_name
+        if resolved_service_version:
+            resource_attrs['service.version'] = resolved_service_version
+        resource = Resource.create(resource_attrs)
 
         sev_num, sev_text = level_to_severity(entry.level)
         body = (entry.message or entry.raw or '').strip() or '-'
@@ -154,6 +245,8 @@ def build_read_write_records(
             attrs['fastlog.trace_id'] = entry.trace_id
         if entry.action:
             attrs['fastlog.action'] = entry.action
+        for key, value in sorted((entry.attrs or {}).items()):
+            attrs[f'fastlog.{key}'] = value
         if count > 1:
             attrs['fastlog.repeat_count'] = str(count)
 

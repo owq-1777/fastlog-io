@@ -20,6 +20,7 @@ class Config:
         '<level>{level:<8}</level> | '
         '<light-black>{extra[trace_id]}</light-black> | '
         '<cyan>{module}.{function}:{line}</cyan> | '
+        '<light-black>{extra[structured_extra]}</light-black> | '
         '<level>{message}</level>'
         '\n{exception}'
     )

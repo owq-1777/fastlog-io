@@ -1,4 +1,5 @@
 import sys
+import json
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping
@@ -108,6 +109,22 @@ def patch_trace(record: Mapping[str, Any]) -> None:
     record['extra']['trace_id'] = trace_id
 
 
+def patch_structured_extra(record: Mapping[str, Any]) -> None:
+    extra = dict(record['extra'])
+    for key in ('trace_id', 'sub_trace_id', 'action', 'structured_extra'):
+        extra.pop(key, None)
+    if extra:
+        record['extra']['structured_extra'] = json.dumps(
+            extra,
+            ensure_ascii=True,
+            separators=(',', ':'),
+            sort_keys=True,
+            default=str,
+        )
+    else:
+        record['extra']['structured_extra'] = '-'
+
+
 # --------------------------------------------------------------------------- #
 # Config
 # --------------------------------------------------------------------------- #
@@ -122,7 +139,7 @@ logger = Logger(
     colors=False,
     raw=False,
     capture=True,
-    patchers=[patch_trace],
+    patchers=[patch_trace, patch_structured_extra],
     extra={},
 )
 

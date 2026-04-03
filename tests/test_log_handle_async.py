@@ -1,7 +1,9 @@
 """Async delivery: flush joins workers; worker failures must not deadlock flush."""
 
 import time
+from pathlib import Path
 
+import pytest
 from fastlog.log_handle import LogNotificationHandler
 
 _ERR_LINE = '2025-01-02 00:00:00.000 | ERROR    | tid | a | x | boom'
@@ -51,3 +53,32 @@ def test_close_shuts_down_otlp_exporter(monkeypatch):
     monkeypatch.setattr(h._otlp_exporter, 'shutdown', lambda: calls.append(True))
     h.close(wait=False)
     assert calls == [True]
+
+
+def test_handler_uses_native_otel_otlp_endpoint(monkeypatch):
+    monkeypatch.setenv('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://127.0.0.1:4318')
+    monkeypatch.setenv('OTEL_EXPORTER_OTLP_LOGS_PROTOCOL', 'http')
+    h = LogNotificationHandler()
+    try:
+        assert h._otlp_exporter is not None
+    finally:
+        h.close(wait=False)
+
+
+def test_handler_uses_otel_service_name_as_namespace_fallback(monkeypatch):
+    monkeypatch.setenv('OTEL_SERVICE_NAME', 'checkout')
+    monkeypatch.setenv('OTEL_EXPORTER_OTLP_ENDPOINT', 'http://127.0.0.1:4318')
+    monkeypatch.setenv('OTEL_EXPORTER_OTLP_LOGS_PROTOCOL', 'http')
+    h = LogNotificationHandler()
+    try:
+        assert h._otlp_service_name == 'checkout'
+    finally:
+        h.close(wait=False)
+
+
+def test_handler_fails_fast_on_invalid_grpc_roots_file(monkeypatch, tmp_path: Path):
+    roots = tmp_path / 'roots.pem'
+    roots.write_text('', encoding='utf-8')
+    monkeypatch.setenv('GRPC_DEFAULT_SSL_ROOTS_FILE_PATH', str(roots))
+    with pytest.raises(ValueError, match='GRPC_DEFAULT_SSL_ROOTS_FILE_PATH'):
+        LogNotificationHandler(otlp_endpoint='https://otel-grpc.aurtech.cc')

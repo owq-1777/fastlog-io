@@ -8,10 +8,15 @@ from typing import Sequence
 
 from .log_handle import LogNotificationHandler
 from .monitor import MultiLogWatcher
+from .otlp_export import configured_otlp_endpoint
 
 
 class _HelpFormatter(argparse.RawDescriptionHelpFormatter):
     """Preserve epilog layout; defaults are described in help text where useful."""
+
+
+def _argv_contains_option(argv_list: Sequence[str], name: str) -> bool:
+    return any(arg == name or arg.startswith(f'{name}=') for arg in argv_list)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,7 +30,7 @@ Examples:
   fastlog ./logs --otlp-endpoint https://collector.example.com
   fastlog ./logs --tg-token "$TG_TOKEN" --tg-chat-id "$CHAT_ID"
 
-At least one of --endpoint, (--tg-token and --tg-chat-id), or --otlp-endpoint is required.
+At least one of --endpoint, (--tg-token and --tg-chat-id), or an OTLP endpoint via --otlp-endpoint / OTel env is required.
 OTLP needs: pip install "fastlog-io[otlp]". Batches are delivered in background threads; shutdown drains queues.
 HTTP/Telegram retries: --http-attempts (default 3) or $FASTLOG_HTTP_ATTEMPTS. See README for all env vars.
 """,
@@ -63,8 +68,8 @@ HTTP/Telegram retries: --http-attempts (default 3) or $FASTLOG_HTTP_ATTEMPTS. Se
     )
     dest.add_argument(
         '--otlp-endpoint',
-        default=os.getenv('FASTLOG_OTLP_ENDPOINT') or os.getenv('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT'),
-        help='OTLP collector URL (HTTP …/v1/logs or gRPC https://host); requires fastlog-io[otlp].',
+        default=None,
+        help='Explicit OTLP collector URL override; when unset, native OTel OTLP endpoint env applies.',
     )
     dest.add_argument(
         '--otlp-protocol',
@@ -74,8 +79,8 @@ HTTP/Telegram retries: --http-attempts (default 3) or $FASTLOG_HTTP_ATTEMPTS. Se
     )
     dest.add_argument(
         '--otlp-service-name',
-        default=os.getenv('OTEL_SERVICE_NAME') or 'fastlog',
-        help='OTLP resource service.name (default: fastlog; override with $OTEL_SERVICE_NAME).',
+        default=None,
+        help='OTLP resource service.namespace; service.name is derived from log family.',
     )
     dest.add_argument(
         '--otlp-max-batch',
@@ -92,7 +97,7 @@ HTTP/Telegram retries: --http-attempts (default 3) or $FASTLOG_HTTP_ATTEMPTS. Se
     batch.add_argument(
         '--timeout',
         default=os.getenv('FASTLOG_NOTIFY_TIMEOUT'),
-        help='HTTP/OTLP request timeout in seconds (default: 5).',
+        help='HTTP/Telegram timeout in seconds (default: 5). Explicit CLI use also overrides OTLP exporter timeout.',
     )
     batch.add_argument(
         '--window-seconds',
@@ -140,14 +145,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     endpoint = (args.endpoint or '').strip() or None
     otlp_endpoint = (args.otlp_endpoint or '').strip() or None
+    otlp_enabled = bool(configured_otlp_endpoint(otlp_endpoint))
 
-    if not endpoint and not (args.tg_token and args.tg_chat_id) and not otlp_endpoint:
-        parser.error('Provide --endpoint, or both --tg-token and --tg-chat-id, or --otlp-endpoint.')
+    if not endpoint and not (args.tg_token and args.tg_chat_id) and not otlp_enabled:
+        parser.error(
+            'Provide --endpoint, or both --tg-token and --tg-chat-id, or configure OTLP via --otlp-endpoint / OTel env.'
+        )
 
+    timeout_arg_explicit = _argv_contains_option(argv_list, '--timeout')
     try:
-        timeout = float(args.timeout) if args.timeout is not None else 5.0
+        parsed_timeout = float(args.timeout) if args.timeout is not None else None
     except ValueError as exc:
         parser.error(f'Invalid --timeout value: {exc}')
+    timeout = parsed_timeout if parsed_timeout is not None else 5.0
+    otlp_timeout = parsed_timeout if timeout_arg_explicit else None
 
     try:
         window_seconds = float(args.window_seconds)
@@ -196,10 +207,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             telegram_chat_id=args.tg_chat_id,
             otlp_endpoint=otlp_endpoint,
             otlp_service_name=args.otlp_service_name,
+            otlp_timeout=otlp_timeout,
             otlp_max_batch=otlp_max_batch,
             otlp_protocol=otlp_protocol,
             http_attempts=http_attempts,
         )
+    except ValueError as exc:
+        parser.error(str(exc))
     except ImportError as exc:
         print(f'fastlog: {exc}', file=sys.stderr)
         print('Install OTLP support: pip install "fastlog-io[otlp]"', file=sys.stderr)
