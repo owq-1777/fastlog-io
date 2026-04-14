@@ -15,6 +15,31 @@ from fastlog.otlp_export import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_otlp_env(monkeypatch):
+    for name in (
+        'FASTLOG_OTLP_ENDPOINT',
+        'GRPC_DEFAULT_SSL_ROOTS_FILE_PATH',
+        'OTEL_EXPORTER_OTLP_CERTIFICATE',
+        'OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE',
+        'OTEL_EXPORTER_OTLP_CLIENT_KEY',
+        'OTEL_EXPORTER_OTLP_ENDPOINT',
+        'OTEL_EXPORTER_OTLP_HEADERS',
+        'OTEL_EXPORTER_OTLP_LOGS_CERTIFICATE',
+        'OTEL_EXPORTER_OTLP_LOGS_CLIENT_CERTIFICATE',
+        'OTEL_EXPORTER_OTLP_LOGS_CLIENT_KEY',
+        'OTEL_EXPORTER_OTLP_LOGS_ENDPOINT',
+        'OTEL_EXPORTER_OTLP_LOGS_HEADERS',
+        'OTEL_EXPORTER_OTLP_LOGS_PROTOCOL',
+        'OTEL_EXPORTER_OTLP_LOGS_TIMEOUT',
+        'OTEL_EXPORTER_OTLP_PROTOCOL',
+        'OTEL_EXPORTER_OTLP_TIMEOUT',
+        'OTEL_RESOURCE_ATTRIBUTES',
+        'SSL_CERT_FILE',
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 def test_resolve_auto_http_when_v1_logs_in_path():
     assert resolve_otlp_protocol('https://collector/v1/logs', None) == 'http'
 
@@ -138,10 +163,10 @@ class TestOtlpExportRecords:
         rows = build_read_write_records([p], service_name='svc', package_version='9.9.9')
         assert len(rows) == 1
         body = rows[0].log_record.body
-        assert 'boom' in str(body)
-        assert '(x2)' in str(body)
+        assert str(body) == 'mod.fn:1 | boom'
         attrs = dict(rows[0].log_record.attributes or {})
         resource_attrs = dict(rows[0].resource.attributes or {})
+        assert attrs.get('log_count') == 2
         assert attrs.get('fastlog.trace_id') == 'tid'
         assert resource_attrs['service.name'] == 'app'
         assert resource_attrs['service.namespace'] == 'svc'
@@ -174,7 +199,7 @@ class TestOtlpExportRecords:
         rows = build_read_write_records([p], service_name='svc', package_version='1.0.0')
         attrs = dict(rows[0].log_record.attributes or {})
         assert attrs['fastlog.note'] == 'a | b'
-        assert str(rows[0].log_record.body) == 'hello | world'
+        assert str(rows[0].log_record.body) == 'mod.x:1 | hello | world'
 
     def test_build_read_write_records_uses_run_env_and_native_resource_attributes(self, monkeypatch):
         monkeypatch.setenv('RUN_ENV', 'prod')

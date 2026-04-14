@@ -234,11 +234,10 @@ def build_read_write_records(
         resource = Resource.create(resource_attrs)
 
         sev_num, sev_text = level_to_severity(entry.level)
-        body = (entry.message or entry.raw or '').strip() or '-'
-        if count > 1:
-            body = f'(x{count}) {body}'
+        message = (entry.message or entry.raw or '').strip() or '-'
+        body = f'{entry.action} | {message}' if entry.action else message
 
-        attrs: dict[str, str] = {
+        attrs: dict[str, str | int] = {
             'fastlog.family': entry.family,
         }
         if entry.trace_id:
@@ -248,7 +247,7 @@ def build_read_write_records(
         for key, value in sorted((entry.attrs or {}).items()):
             attrs[f'fastlog.{key}'] = value
         if count > 1:
-            attrs['fastlog.repeat_count'] = str(count)
+            attrs['log_count'] = count
 
         ts_ns = entry_time_unix_ns(entry.time)
         lr = APILogRecord(
