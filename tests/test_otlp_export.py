@@ -163,7 +163,7 @@ class TestOtlpExportRecords:
         rows = build_read_write_records([p], service_name='svc', package_version='9.9.9')
         assert len(rows) == 1
         body = rows[0].log_record.body
-        assert str(body) == 'mod.fn:1 | boom'
+        assert str(body) == 'tid | mod.fn:1 | boom'
         attrs = dict(rows[0].log_record.attributes or {})
         resource_attrs = dict(rows[0].resource.attributes or {})
         assert attrs.get('log_count') == 2
@@ -199,7 +199,44 @@ class TestOtlpExportRecords:
         rows = build_read_write_records([p], service_name='svc', package_version='1.0.0')
         attrs = dict(rows[0].log_record.attributes or {})
         assert attrs['fastlog.note'] == 'a | b'
-        assert str(rows[0].log_record.body) == 'mod.x:1 | hello | world'
+        assert str(rows[0].log_record.body) == 'abcTraceId | mod.x:1 | hello | world'
+
+    def test_build_read_write_records_maps_http_action_message_attributes(self):
+        e = LogEntry(
+            family='app',
+            raw='line',
+            time='2025-01-02 03:04:05.000',
+            level='INFO',
+            trace_id='tid',
+            action='http',
+            message='GET /api/users 200 12.34ms 203.0.113.8 us',
+        )
+        p = _Pending(e, 1, time.monotonic(), True)
+        rows = build_read_write_records([p], service_name='svc', package_version='1.0.0')
+        attrs = dict(rows[0].log_record.attributes or {})
+        assert attrs['http.request.method'] == 'GET'
+        assert attrs['url.path'] == '/api/users'
+        assert attrs['http.response.status_code'] == 200
+        assert attrs['fastlog.process_time_ms'] == 12.34
+        assert attrs['client.address'] == '203.0.113.8'
+        assert attrs['geo.country.iso_code'] == 'US'
+        assert str(rows[0].log_record.body) == 'tid | http | GET /api/users 200 12.34ms 203.0.113.8 us'
+
+    def test_build_read_write_records_ignores_malformed_http_action_message_attributes(self):
+        e = LogEntry(
+            family='app',
+            raw='line',
+            time='2025-01-02 03:04:05.000',
+            level='INFO',
+            action='http',
+            message='GET /api/users 200',
+        )
+        p = _Pending(e, 1, time.monotonic(), True)
+        rows = build_read_write_records([p], service_name='svc', package_version='1.0.0')
+        attrs = dict(rows[0].log_record.attributes or {})
+        assert attrs['fastlog.action'] == 'http'
+        assert 'http.request.method' not in attrs
+        assert 'http.response.status_code' not in attrs
 
     def test_build_read_write_records_uses_run_env_and_native_resource_attributes(self, monkeypatch):
         monkeypatch.setenv('RUN_ENV', 'prod')

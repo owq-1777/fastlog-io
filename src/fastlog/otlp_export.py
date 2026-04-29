@@ -198,6 +198,34 @@ def entry_time_unix_ns(time_str: str | None) -> int:
         return time.time_ns()
 
 
+def _http_action_attrs(action: str | None, message: str) -> dict[str, str | int | float]:
+    if (action or '').strip() != 'http':
+        return {}
+
+    parts = message.split()
+    if len(parts) != 6:
+        return {}
+
+    method, path, status_code, process_time, client_ip, country_code = parts
+    if not method or not path or not status_code.isdigit() or not process_time.endswith('ms'):
+        return {}
+
+    duration_raw = process_time[:-2]
+    try:
+        duration_ms = float(duration_raw)
+    except ValueError:
+        return {}
+
+    return {
+        'http.request.method': method.upper(),
+        'url.path': path,
+        'http.response.status_code': int(status_code),
+        'fastlog.process_time_ms': duration_ms,
+        'client.address': client_ip,
+        'geo.country.iso_code': country_code.upper(),
+    }
+
+
 def build_read_write_records(
     pendings: Sequence[object],
     *,
@@ -235,15 +263,16 @@ def build_read_write_records(
 
         sev_num, sev_text = level_to_severity(entry.level)
         message = (entry.message or entry.raw or '').strip() or '-'
-        body = f'{entry.action} | {message}' if entry.action else message
+        body = ' | '.join(part for part in (entry.trace_id, entry.action, message) if part)
 
-        attrs: dict[str, str | int] = {
+        attrs: dict[str, str | int | float] = {
             'fastlog.family': entry.family,
         }
         if entry.trace_id:
             attrs['fastlog.trace_id'] = entry.trace_id
         if entry.action:
             attrs['fastlog.action'] = entry.action
+        attrs.update(_http_action_attrs(entry.action, message))
         for key, value in sorted((entry.attrs or {}).items()):
             attrs[f'fastlog.{key}'] = value
         if count > 1:
