@@ -263,7 +263,7 @@ def build_read_write_records(
 
         sev_num, sev_text = level_to_severity(entry.level)
         message = (entry.message or entry.raw or '').strip() or '-'
-        body = ' | '.join(part for part in (entry.trace_id, entry.action, message) if part)
+        body = message
 
         attrs: dict[str, str | int | float] = {
             'fastlog.family': entry.family,
